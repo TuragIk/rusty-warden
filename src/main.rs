@@ -1,28 +1,29 @@
 use clap::Parser;
-use walkdir::{DirEntry, WalkDir};
-
+use std::path::Path;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
     #[arg(short, long)]
     path: String,
-}
-fn is_hidden(entry: &DirEntry) -> bool {
-    entry
-        .file_name()
-        .to_str()
-        .map(|s| s.starts_with("."))
-        .unwrap_or(false)
+
+    #[arg(long)]
+    json: bool,
 }
 fn main() {
     let args = Args::parse();
-    WalkDir::new(args.path)
-        .into_iter()
-        .filter_entry(|e| !is_hidden(e))
-        .filter_map(|e| e.ok())
-        .for_each(|entry| {
-            if entry.file_type().is_file() {
-                println!("{}", entry.path().display());
+    let path = Path::new(&args.path);
+    match rusty_warden::scan_directory(path) {
+        Ok(findings) => {
+            if args.json {
+                let json_output = serde_json::to_string_pretty(&findings).unwrap();
+                println!("{}", json_output);
+            } else {
+                for finding in findings {
+                    println!("{}:{}: Found potential secret", finding.file, finding.line);
+                    println!("Content: {}", finding.content);
+                }
             }
-        });
+        }
+        Err(e) => eprintln!("Error: {}", e),
+    }
 }
