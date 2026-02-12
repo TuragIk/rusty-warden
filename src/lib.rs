@@ -1,4 +1,5 @@
 use anyhow::Result;
+use rayon::prelude::*;
 use regex::Regex;
 use serde::Serialize;
 use std::{
@@ -44,20 +45,21 @@ fn scan_file(path: &Path, re: &Regex) -> Result<Vec<Finding>> {
 
 pub fn scan_directory(path: &Path) -> Result<Vec<Finding>> {
     let secret_regex = Regex::new(r"(?i)AWS_ACCESS_ID|password=|BEGIN RSA PRIVATE KEY").unwrap();
-    let mut findings = Vec::new();
-    let walker = WalkDir::new(path).into_iter();
-    for entry in walker.filter_entry(|e| !is_hidden(e) || e.depth() == 0) {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        if entry.file_type().is_file() {
-            match scan_file(entry.path(), &secret_regex) {
-                Ok(f) => findings.extend(f),
-                Err(e) => eprintln!("Error reading {:?}: {}", entry.path(), e),
-            }
-        }
-    }
+    let paths: Vec<_> = WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| !is_hidden(&e))
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.path().to_owned())
+        .collect();
+
+    let findings: Vec<Finding> = paths
+        .par_iter()
+        .flat_map(|path| match scan_file(path, &secret_regex) {
+            Ok(findings) => findings,
+            Err(_) => Vec::new(),
+        })
+        .collect();
     Ok(findings)
 }
 
